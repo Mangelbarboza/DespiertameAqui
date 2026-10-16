@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -16,6 +17,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -85,6 +88,10 @@ fun MainScreen() {
         )
     }
     val currentTripState by rememberUpdatedState(tripState)
+    var showPrivacy by remember { mutableStateOf(false) }
+    var showLocationNotice by remember {
+        mutableStateOf(!tripPreferences.getBoolean("location_notice_seen", false))
+    }
 
     var locationPermissionGranted by remember {
         mutableStateOf(
@@ -117,11 +124,7 @@ fun MainScreen() {
             }
         }
         val filter = IntentFilter("LOCATION_UPDATE")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(receiver, filter)
-        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose {
             context.unregisterReceiver(receiver)
         }
@@ -134,9 +137,8 @@ fun MainScreen() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         permissions.add(Manifest.permission.POST_NOTIFICATIONS)
     }
-    // Note: ACCESS_BACKGROUND_LOCATION is not added here because on Android 11+
-    // it must be requested separately from foreground permissions.
-    // The Foreground Service with type "location" will still work for our tracking.
+    // A trip is started by the user while the activity is visible. Location
+    // continues through the visible foreground service, without background permission.
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -150,8 +152,37 @@ fun MainScreen() {
         }
     }
 
-    LaunchedEffect(Unit) {
-        launcher.launch(permissions.toTypedArray())
+    if (showLocationNotice) {
+        AlertDialog(
+            onDismissRequest = { showLocationNotice = false },
+            title = { Text("Ubicación durante tu viaje") },
+            text = {
+                Text("Despiértame Aquí usa tu ubicación para calcular la distancia al destino y avisarte al acercarte. Durante un viaje iniciado por ti, sigue usando la ubicación aunque la pantalla esté apagada o estés en otra app, con una notificación visible. Puedes pausar o terminar el viaje. El mapa y las búsquedas se conectan con proveedores externos. No enviamos tu recorrido a un servidor propio.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    tripPreferences.edit().putBoolean("location_notice_seen", true).apply()
+                    showLocationNotice = false
+                    launcher.launch(permissions.toTypedArray())
+                }) { Text("Continuar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLocationNotice = false }) { Text("Ahora no") }
+            }
+        )
+    }
+
+    if (showPrivacy) {
+        AlertDialog(
+            onDismissRequest = { showPrivacy = false },
+            title = { Text("Política de privacidad") },
+            text = {
+                Text(PRIVACY_TEXT, modifier = Modifier.verticalScroll(rememberScrollState()))
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacy = false }) { Text("Cerrar") }
+            }
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -188,6 +219,11 @@ fun MainScreen() {
             @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
                 title = { Text("Despiértame Aquí", fontWeight = FontWeight.Bold) },
+                actions = {
+                    TextButton(onClick = { showPrivacy = true }) {
+                        Text("Privacidad", color = Color.White)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = Color.White
@@ -324,6 +360,14 @@ fun MainScreen() {
                         contentDescription = "Centrar en mi ubicación"
                     )
                 }
+
+                Surface(modifier = Modifier.align(Alignment.BottomStart)) {
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.openstreetmap.org/copyright")))
+                    }) {
+                        Text("© OpenStreetMap", fontSize = 11.sp)
+                    }
+                }
             }
 
             // Panel de Control inferior
@@ -363,6 +407,10 @@ fun MainScreen() {
                     if (tripState == TripState.IDLE) {
                         Button(
                             onClick = {
+                                if (!locationPermissionGranted) {
+                                    showLocationNotice = true
+                                    return@Button
+                                }
                                 if (selectedLocation != null) {
                                     val intent = Intent(context, LocationService::class.java).apply {
                                         putExtra("target_lat", selectedLocation!!.latitude)

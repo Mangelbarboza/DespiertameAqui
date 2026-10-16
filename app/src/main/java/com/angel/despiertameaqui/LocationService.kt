@@ -158,7 +158,7 @@ class LocationService : Service() {
             .build()
 
         notificationManager.notify(2, notification)
-        sendBroadcast(Intent("LOCATION_UPDATE").putExtra("trip_finished", true))
+        sendBroadcast(Intent("LOCATION_UPDATE").setPackage(packageName).putExtra("trip_finished", true))
     }
 
     private fun saveState(state: String) {
@@ -193,7 +193,7 @@ class LocationService : Service() {
         notificationManager.notify(1, createNotification(content))
 
         // Enviar broadcast para actualizar la UI
-        val intent = Intent("LOCATION_UPDATE")
+        val intent = Intent("LOCATION_UPDATE").setPackage(packageName)
         intent.putExtra("status_text", content)
         sendBroadcast(intent)
     }
